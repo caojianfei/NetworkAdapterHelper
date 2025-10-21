@@ -1,0 +1,330 @@
+<Window x:Class="NetworkAdapterHelper.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:NetworkAdapterHelper"
+        xmlns:models="clr-namespace:NetworkAdapterHelper.Models"
+        mc:Ignorable="d"
+        Title="网络适配器助手" 
+        Height="640" 
+        Width="900"
+        MinHeight="550"
+        MinWidth="700"
+        WindowStartupLocation="CenterScreen"
+        Icon="Resources/app.ico"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
+
+    <Window.Resources>
+        <!-- 样式定义 -->
+        <Style x:Key="ModernButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#FF0078D4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" 
+                                CornerRadius="4"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                BorderBrush="{TemplateBinding BorderBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" 
+                                            VerticalAlignment="Center"
+                                            Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#FF106EBE"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#FF005A9E"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#FFE1E1E1"/>
+                                <Setter Property="Foreground" Value="#FF717171"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+            <Setter Property="Background" Value="#FF6C757D"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FF5A6268"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#FF495057"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+            <Setter Property="Background" Value="#FFDC3545"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FFC82333"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#FFBD2130"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SuccessButtonStyle" TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}">
+            <Setter Property="Background" Value="#FF28A745"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#FF218838"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#FF1E7E34"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 适配器类型图标转换器 -->
+        <local:AdapterTypeToIconConverter x:Key="AdapterTypeToIconConverter"/>
+        <local:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <local:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏 -->
+        <Border Grid.Row="0" Background="#FF0078D4" Padding="16,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="🌐" FontSize="20" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="网络适配器助手" 
+                             FontSize="18" 
+                             FontWeight="SemiBold" 
+                             Foreground="White" 
+                             VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="刷新" 
+                            Command="{Binding RefreshCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Background="Transparent"
+                            BorderBrush="White"
+                            BorderThickness="1"
+                            Padding="12,8"/>
+                    
+                    <Button Content="设置" 
+                            Command="{Binding ShowSettingsCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Background="Transparent"
+                            BorderBrush="White"
+                            BorderThickness="1"
+                            Padding="12,8"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 主内容区域 -->
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="1*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 适配器列表 -->
+            <GroupBox Grid.Column="0" Header="网络适配器列表" Padding="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- 适配器列表视图 -->
+                    <ListView Grid.Row="0" 
+                            ItemsSource="{Binding Adapters}"
+                            SelectedItem="{Binding SelectedAdapter}"
+                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="名称" Width="150">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding FriendlyName}" 
+                                                     TextWrapping="Wrap"
+                                                     ToolTip="{Binding Description}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                
+                                <GridViewColumn Header="设备名称" Width="200">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" 
+                                                     TextWrapping="Wrap"
+                                                     ToolTip="{Binding Description}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                
+                                <GridViewColumn Header="类型" Width="80">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Type}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                
+                                <!-- 连接状态列，绑定到 NetworkAdapter.Status -->
+                                <GridViewColumn Header="状态" Width="100">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Status}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                
+                                <GridViewColumn Header="最后更新" Width="120">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding LastUpdated, StringFormat='{}{0:HH:mm:ss}'}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <!-- 列表加载指示器（限制在适配器列表区域） -->
+                    <Border Grid.Row="0" Background="#80000000" Panel.ZIndex="10"
+                            Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressBar IsIndeterminate="True" Width="200" Height="4" Margin="0,0,0,16"/>
+                            <TextBlock Text="正在处理..." Foreground="White" FontSize="14" HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 适配器操作按钮 -->
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="启用/禁用" 
+                            Command="{Binding ToggleAdapterCommand}"
+                            Style="{StaticResource ModernButtonStyle}"
+                            IsEnabled="{Binding IsAdapterSelected}"
+                            Padding="12,8"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <!-- 控制面板 -->
+            <GroupBox Grid.Column="2" Header="快速操作" Padding="8">
+                <StackPanel>
+                    <!-- 批量操作 -->
+                    <TextBlock Text="批量操作" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    
+                    <Button Content="启用所有适配器" 
+                            Command="{Binding EnableAllCommand}"
+                            Style="{StaticResource SuccessButtonStyle}"
+                            HorizontalAlignment="Stretch"
+                            Margin="0,0,0,8"/>
+                    
+                    <Button Content="禁用所有适配器" 
+                            Command="{Binding DisableAllCommand}"
+                            Style="{StaticResource DangerButtonStyle}"
+                            HorizontalAlignment="Stretch"
+                            Margin="0,0,0,8"/>
+
+                    <!-- 分隔线 -->
+                    <Separator Margin="0,16"/>
+
+                    <!-- 适配器切换 -->
+                    <TextBlock Text="适配器切换" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    
+                    <Grid Visibility="{Binding IsSwitchConfigured, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Text="适配器 A:" FontSize="12" Foreground="Gray"/>
+                        <TextBlock Grid.Row="1" Text="{Binding AdapterAName}" 
+                                 FontWeight="SemiBold" Margin="0,2,0,8"
+                                 TextWrapping="Wrap"/>
+                        
+                        <TextBlock Grid.Row="2" Text="适配器 B:" FontSize="12" Foreground="Gray"/>
+                        <TextBlock Grid.Row="3" Text="{Binding AdapterBName}" 
+                                 FontWeight="SemiBold" Margin="0,2,0,16"
+                                 TextWrapping="Wrap"/>
+                    </Grid>
+
+                    <Button Content="切换适配器" 
+                            Command="{Binding SwitchAdaptersCommand}"
+                            Style="{StaticResource ModernButtonStyle}"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="{Binding IsSwitchConfigured}"
+                            Margin="0,0,0,8"/>
+
+                    <TextBlock Text="请在设置中配置要切换的适配器"
+                             FontSize="11"
+                             Foreground="Gray"
+                             TextWrapping="Wrap"
+                             Visibility="{Binding IsSwitchConfigured, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                             Margin="0,0,0,8"/>
+
+                    <!-- 分隔线 -->
+                    <Separator Margin="0,16"/>
+
+                    <!-- 应用程序操作 -->
+                    <TextBlock Text="应用程序" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    
+                    <Button Content="最小化到托盘" 
+                            Command="{Binding MinimizeToTrayCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            HorizontalAlignment="Stretch"/>
+                    
+                    <Button Content="退出" 
+                            Command="{Binding ExitCommand}"
+                            Style="{StaticResource DangerButtonStyle}"
+                            HorizontalAlignment="Stretch"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+
+        <!-- 加载指示器 -->
+
+        <!-- 状态栏 -->
+        <Border Grid.Row="3" Background="#FFF0F0F0" BorderBrush="#FFCCCCCC" BorderThickness="0,1,0,0">
+            <Grid Margin="16,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" 
+                         Text="{Binding StatusMessage}" 
+                         VerticalAlignment="Center"
+                         FontSize="12"/>
+
+                <!-- 已移除右下角文字的容器 -->
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
