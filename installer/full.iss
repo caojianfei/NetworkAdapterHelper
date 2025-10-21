@@ -10,7 +10,7 @@
 #endif
 #define MyCompanyName "NetworkAdapterHelper"
 #ifndef PublishDir
-#define PublishDir "..\\artifacts\\single-file-self-contained\\win-x64"
+#define PublishDir "..\\artifacts\\sc-multi\\win-x64"
 #endif
 #ifndef ArchLabel
 #define ArchLabel "x64"

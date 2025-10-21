@@ -111,7 +111,7 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CsprojPath = Join-Path $ScriptRoot 'NetworkAdapterHelper.csproj'
 $ArtifactsDir = Join-Path $ScriptRoot 'artifacts'
 $LogsDir = Join-Path $ArtifactsDir 'logs'
-$PublishSelfContainedDir = Join-Path $ArtifactsDir "single-file-self-contained\$RuntimeIdentifier"
+$PublishSelfContainedMultiDir = Join-Path $ArtifactsDir "sc-multi\$RuntimeIdentifier"
 $PublishFrameworkDependentDir = Join-Path $ArtifactsDir "single-file-framework-dependent\$RuntimeIdentifier"
 $PublishFrameworkDependentMultiDir = Join-Path $ArtifactsDir "fde-multi\$RuntimeIdentifier"
 $InstallersOutputDir = $ArtifactsDir
@@ -220,22 +220,23 @@ function Find-InnoCompiler {
 
 #
 # 函数: Invoke-DotnetPublish
-# 说明: 执行 dotnet publish 生成单文件版本
-# 参数: [bool] $SelfContained, [string] $OutputDir, [string] $RuntimeId
+# 说明: 执行 dotnet publish 生成版本（支持单文件和多文件）
+# 参数: [bool] $SelfContained, [string] $OutputDir, [string] $RuntimeId, [bool] $SingleFile
 # 返回: 无（抛出异常表示失败）
 #
 function Invoke-DotnetPublish {
   param(
     [bool]$SelfContained,
     [string]$OutputDir,
-    [string]$RuntimeId
+    [string]$RuntimeId,
+    [bool]$SingleFile = $false
   )
   Ensure-Directory $OutputDir
   $scFlag = if ($SelfContained) { 'true' } else { 'false' }
+  $singleFileFlag = if ($SingleFile) { 'true' } else { 'false' }
 
-  Write-Log "Publishing: SelfContained=$scFlag, RID=$RuntimeId, Output=$OutputDir"
+  Write-Log "Publishing: SelfContained=$scFlag, SingleFile=$singleFileFlag, RID=$RuntimeId, Output=$OutputDir"
 
-  $singleFileFlag = if ($SelfContained) { 'true' } else { 'false' }
   $args = @(
     'publish',
     $CsprojPath,
@@ -247,11 +248,16 @@ function Invoke-DotnetPublish {
     '-p:PublishTrimmed=false',
     '-p:DebugType=None',
     '-p:PublishReadyToRun=true',
+    '-p:SatelliteResourceLanguages=en',
     '--self-contained', $scFlag,
     '-o', $OutputDir
   )
 
-  $pubSuffix = if ($SelfContained) { 'sc' } else { 'fde' }
+  $pubSuffix = if ($SelfContained) { 
+    if ($SingleFile) { 'sc-single' } else { 'sc-multi' }
+  } else { 
+    'fde' 
+  }
   $pubLogPath = Join-Path $LogsDir ("publish_" + $pubSuffix + "_" + $RuntimeId + ".log")
   & dotnet @args | Tee-Object -FilePath $pubLogPath
 
@@ -360,9 +366,27 @@ function Create-ZipPackage {
   $zipDir = Split-Path -Parent $ZipPath
   Ensure-Directory $zipDir
   
+  # 如果文件已存在，先尝试删除
+  if (Test-Path -LiteralPath $ZipPath) {
+    try {
+      Remove-Item -Path $ZipPath -Force -ErrorAction Stop
+      Write-Log "Removed existing ZIP file: $ZipPath"
+    }
+    catch {
+      Write-Log "Failed to remove existing ZIP file: $ZipPath. Error: $($_.Exception.Message)" 'ERROR'
+      throw
+    }
+  }
+  
   # 使用 PowerShell 5.0+ 的 Compress-Archive 命令
-  Compress-Archive -Path "$SourceDir\*" -DestinationPath $ZipPath -Force
-  Write-Log "ZIP package created successfully: $ZipPath"
+  try {
+    Compress-Archive -Path "$SourceDir\*" -DestinationPath $ZipPath -ErrorAction Stop
+    Write-Log "ZIP package created successfully: $ZipPath"
+  }
+  catch {
+    Write-Log "Failed to create ZIP package: $ZipPath. Error: $($_.Exception.Message)" 'ERROR'
+    throw
+  }
 }
 
 #
@@ -397,6 +421,37 @@ function Create-FdeMultiZipPackages {
 }
 
 #
+# 函数: Create-ScMultiZipPackages
+# 说明: 将 sc-multi 目录下的各个子文件夹分别打包为压缩包
+# 参数: [string] $ScMultiDir - sc-multi 根目录路径, [string] $OutputDir - 输出目录, [string] $Version - 版本号
+# 返回: 无
+#
+function Create-ScMultiZipPackages {
+  param(
+    [string]$ScMultiDir,
+    [string]$OutputDir,
+    [string]$Version
+  )
+  if (-not (Test-Path -LiteralPath $ScMultiDir)) {
+    Write-Log "SC multi directory not found: $ScMultiDir" 'WARN'
+    return
+  }
+  
+  Write-Log "Creating SC multi ZIP packages from: $ScMultiDir"
+  
+  # 获取所有子文件夹
+  $subDirs = Get-ChildItem -Path $ScMultiDir -Directory
+  foreach ($subDir in $subDirs) {
+    $archLabel = Get-ArchLabel -Rid $subDir.Name
+    $zipFileName = "NetworkAdapterHelper_Full_${archLabel}_${Version}.zip"
+    $zipPath = Join-Path $OutputDir $zipFileName
+    
+    Write-Log "Creating ZIP for architecture: $($subDir.Name) -> $zipFileName"
+    Create-ZipPackage -SourceDir $subDir.FullName -ZipPath $zipPath
+  }
+}
+
+#
 # 函数: Organize-ReleaseFiles
 # 说明: 整理发布文件，统一命名规范并移动到 artifacts 根目录
 # 参数: [string] $Version - 版本号
@@ -412,29 +467,16 @@ function Organize-ReleaseFiles {
   $fdeMultiDir = Join-Path $ArtifactsDir "fde-multi"
   Create-FdeMultiZipPackages -FdeMultiDir $fdeMultiDir -OutputDir $ArtifactsDir -Version $Version
   
-  # 2. 移动并重命名完整可执行文件 (所有架构)
-  $selfContainedDir = Join-Path $ArtifactsDir "single-file-self-contained"
-  if (Test-Path -LiteralPath $selfContainedDir) {
-    $archDirs = Get-ChildItem -Path $selfContainedDir -Directory
-    foreach ($archDir in $archDirs) {
-      $archLabel = Get-ArchLabel -Rid $archDir.Name
-      $exePath = Join-Path $archDir.FullName "NetworkAdapterHelper.exe"
-      if (Test-Path -LiteralPath $exePath) {
-        $newExePath = Join-Path $ArtifactsDir "NetworkAdapterHelper_Full_${archLabel}_${Version}.exe"
-        Write-Log "Moving self-contained executable: $($archDir.Name) -> NetworkAdapterHelper_Full_${archLabel}_${Version}.exe"
-        Copy-Item -Path $exePath -Destination $newExePath -Force
-      } else {
-        Write-Log "Self-contained executable not found: $exePath" 'WARN'
-      }
-    }
-  }
+  # 2. 创建完整版压缩包 (sc-multi 目录下的所有架构)
+  $scMultiDir = Join-Path $ArtifactsDir "sc-multi"
+  Create-ScMultiZipPackages -ScMultiDir $scMultiDir -OutputDir $ArtifactsDir -Version $Version
   
   # 3. 安装包文件已经直接输出到 artifacts 根目录，无需移动
   Write-Log "Installer files are already in artifacts root directory"
   
   # 4. 清理临时构建目录
   $tempDirs = @(
-    "single-file-self-contained",
+    "sc-multi",
     "single-file-framework-dependent", 
     "fde-multi"
   )
@@ -481,7 +523,7 @@ foreach ($CurrentRuntimeIdentifier in $RuntimeIdentifiers) {
   Write-Log "========================================" 'INFO'
   
   # 重新定义当前平台的路径变量
-  $PublishSelfContainedDir = Join-Path $ArtifactsDir "single-file-self-contained\$CurrentRuntimeIdentifier"
+  $PublishSelfContainedMultiDir = Join-Path $ArtifactsDir "sc-multi\$CurrentRuntimeIdentifier"
   $PublishFrameworkDependentDir = Join-Path $ArtifactsDir "single-file-framework-dependent\$CurrentRuntimeIdentifier"
   $PublishFrameworkDependentMultiDir = Join-Path $ArtifactsDir "fde-multi\$CurrentRuntimeIdentifier"
   
@@ -505,13 +547,13 @@ foreach ($CurrentRuntimeIdentifier in $RuntimeIdentifiers) {
   Write-Log "Architecture: $CurrentRuntimeIdentifier -> Label=$ArchLabel, Identifier=$InnoArchIdentifier, InstallMode=$InnoArchInstallMode"
 
   try {
-    # 发布两个单文件版本
-    Invoke-DotnetPublish -SelfContained:$true -OutputDir $PublishSelfContainedDir -RuntimeId $CurrentRuntimeIdentifier
-    # 发布 FDE（改为多文件）
-    Invoke-DotnetPublish -SelfContained:$false -OutputDir $PublishFrameworkDependentMultiDir -RuntimeId $CurrentRuntimeIdentifier
+    # 发布自包含多文件版本（Full版本）
+    Invoke-DotnetPublish -SelfContained:$true -OutputDir $PublishSelfContainedMultiDir -RuntimeId $CurrentRuntimeIdentifier -SingleFile:$false
+    # 发布 FDE 多文件版本（Slim版本）
+    Invoke-DotnetPublish -SelfContained:$false -OutputDir $PublishFrameworkDependentMultiDir -RuntimeId $CurrentRuntimeIdentifier -SingleFile:$false
 
     try {
-      Build-InstallerFull -IsccPath $isccPath -PublishDir $PublishSelfContainedDir -OutputDir $InstallersOutputDir -ArchLabel $ArchLabel -InnoArchIdentifier $InnoArchIdentifier -InnoArchInstallMode $InnoArchInstallMode
+      Build-InstallerFull -IsccPath $isccPath -PublishDir $PublishSelfContainedMultiDir -OutputDir $InstallersOutputDir -ArchLabel $ArchLabel -InnoArchIdentifier $InnoArchIdentifier -InnoArchInstallMode $InnoArchInstallMode
     }
     catch {
       Write-Log ("Skip full installer for ${CurrentRuntimeIdentifier}: " + $_.Exception.Message) 'WARN'
