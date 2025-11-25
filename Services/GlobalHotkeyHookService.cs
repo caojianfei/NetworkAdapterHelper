@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Input;
+using System.Threading;
 using NetworkAdapterHelper.Models;
 
 namespace NetworkAdapterHelper.Services
@@ -67,13 +68,24 @@ namespace NetworkAdapterHelper.Services
         private readonly HashSet<int> _pressedVKeys = new();
         private List<HotkeyConfig> _configs = new();
         private bool _disposed;
+        
+        // 钩子健康检查相关
+        private Timer? _healthCheckTimer;
+        private DateTime _lastHookActivity = DateTime.Now;
+        private const int HealthCheckIntervalMs = 30000; // 30秒检查一次
+        private const int InactivityThresholdMs = 60000; // 60秒无活动则认为钩子可能失效
+        private int _hookReinstallCount = 0;
 
         /// <summary>
         /// 快捷键触发事件
         /// </summary>
         public event EventHandler<HotkeyTriggeredEventArgs>? HotkeyTriggered;
 
-        private GlobalHotkeyHookService() { }
+        private GlobalHotkeyHookService() 
+        {
+            // 启动健康检查定时器
+            _healthCheckTimer = new Timer(HealthCheckCallback, null, HealthCheckIntervalMs, HealthCheckIntervalMs);
+        }
 
         /// <summary>
         /// 初始化并安装全局低级键盘钩子
@@ -82,22 +94,42 @@ namespace NetworkAdapterHelper.Services
         {
             if (_keyboardHookId != IntPtr.Zero) return;
 
-            _keyboardProc = KeyboardHookCallback;
+            InstallHook();
+            _lastHookActivity = DateTime.Now;
+        }
 
-            var curProcess = Process.GetCurrentProcess();
-            var curModule = curProcess.MainModule;
-            IntPtr hModule = IntPtr.Zero;
-            if (curModule != null)
+        /// <summary>
+        /// 安装键盘钩子
+        /// </summary>
+        private void InstallHook()
+        {
+            try
             {
-                hModule = GetModuleHandle(curModule.ModuleName!);
+                _keyboardProc = KeyboardHookCallback;
+
+                var curProcess = Process.GetCurrentProcess();
+                var curModule = curProcess.MainModule;
+                IntPtr hModule = IntPtr.Zero;
+                if (curModule != null)
+                {
+                    hModule = GetModuleHandle(curModule.ModuleName!);
+                }
+
+                _keyboardHookId = SetWindowsHookEx(WH_KEYBOARD_LL, _keyboardProc, hModule, 0);
+
+                if (_keyboardHookId == IntPtr.Zero)
+                {
+                    int err = Marshal.GetLastWin32Error();
+                    Debug.WriteLine($"安装全局键盘钩子失败，错误代码: {err}");
+                }
+                else
+                {
+                    Debug.WriteLine("全局键盘钩子安装成功");
+                }
             }
-
-            _keyboardHookId = SetWindowsHookEx(WH_KEYBOARD_LL, _keyboardProc, hModule, 0);
-
-            if (_keyboardHookId == IntPtr.Zero)
+            catch (Exception ex)
             {
-                int err = Marshal.GetLastWin32Error();
-                Debug.WriteLine($"安装全局键盘钩子失败，错误代码: {err}");
+                Debug.WriteLine($"安装键盘钩子异常: {ex.Message}");
             }
         }
 
@@ -124,6 +156,9 @@ namespace NetworkAdapterHelper.Services
 
         private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
+            // 更新最后活动时间
+            _lastHookActivity = DateTime.Now;
+            
             if (nCode >= 0)
             {
                 int msg = wParam.ToInt32();
@@ -147,7 +182,14 @@ namespace NetworkAdapterHelper.Services
                     {
                         if (cfg.Key == key && cfg.ModifierKeys == currentMods)
                         {
-                            HotkeyTriggered?.Invoke(this, new HotkeyTriggeredEventArgs(cfg));
+                            try
+                            {
+                                HotkeyTriggered?.Invoke(this, new HotkeyTriggeredEventArgs(cfg));
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"触发快捷键事件异常: {ex.Message}");
+                            }
                             break;
                         }
                     }
@@ -194,10 +236,105 @@ namespace NetworkAdapterHelper.Services
             return mods;
         }
 
+        /// <summary>
+        /// 健康检查回调
+        /// </summary>
+        private void HealthCheckCallback(object? state)
+        {
+            try
+            {
+                // 检查钩子是否仍然有效
+                if (_keyboardHookId == IntPtr.Zero)
+                {
+                    Debug.WriteLine("检测到钩子句柄为空，尝试重新安装...");
+                    ReinstallHook();
+                    return;
+                }
+
+                // 检查钩子是否长时间无活动（可能已失效）
+                var inactiveTime = (DateTime.Now - _lastHookActivity).TotalMilliseconds;
+                if (inactiveTime > InactivityThresholdMs)
+                {
+                    // 注意：长时间无活动不一定意味着钩子失效，可能只是用户没有按键
+                    // 这里只记录日志，不自动重装
+                    Debug.WriteLine($"钩子已 {inactiveTime / 1000:F0} 秒无活动 (重装次数: {_hookReinstallCount})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"健康检查异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 重新安装钩子
+        /// </summary>
+        private void ReinstallHook()
+        {
+            try
+            {
+                Debug.WriteLine($"开始重新安装钩子 (第 {_hookReinstallCount + 1} 次)");
+                
+                // 先卸载旧钩子
+                if (_keyboardHookId != IntPtr.Zero)
+                {
+                    UnhookWindowsHookEx(_keyboardHookId);
+                    _keyboardHookId = IntPtr.Zero;
+                }
+                
+                // 清理状态
+                _pressedVKeys.Clear();
+                
+                // 重新安装
+                InstallHook();
+                
+                if (_keyboardHookId != IntPtr.Zero)
+                {
+                    _hookReinstallCount++;
+                    _lastHookActivity = DateTime.Now;
+                    Debug.WriteLine($"钩子重新安装成功 (累计: {_hookReinstallCount} 次)");
+                }
+                else
+                {
+                    Debug.WriteLine("钩子重新安装失败");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"重新安装钩子异常: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 手动触发钩子重新安装（供外部调用）
+        /// </summary>
+        public void ForceReinstall()
+        {
+            ReinstallHook();
+        }
+
+        /// <summary>
+        /// 获取钩子状态信息
+        /// </summary>
+        public string GetHookStatus()
+        {
+            var isInstalled = _keyboardHookId != IntPtr.Zero;
+            var inactiveTime = (DateTime.Now - _lastHookActivity).TotalSeconds;
+            return $"钩子状态: {(isInstalled ? "已安装" : "未安装")} | "
+                 + $"无活动时间: {inactiveTime:F0}秒 | "
+                 + $"重装次数: {_hookReinstallCount} | "
+                 + $"监听快捷键数: {_configs.Count}";
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            
+            // 停止健康检查定时器
+            _healthCheckTimer?.Dispose();
+            _healthCheckTimer = null;
+            
             Disable();
         }
     }

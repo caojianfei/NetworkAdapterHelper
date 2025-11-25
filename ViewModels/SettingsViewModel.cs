@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Input;
 using NetworkAdapterHelper.Models;
 using NetworkAdapterHelper.Services;
+using NetworkAdapterHelper.Helpers;
 
 namespace NetworkAdapterHelper.ViewModels
 {
@@ -264,6 +265,14 @@ namespace NetworkAdapterHelper.ViewModels
             try
             {
                 Configuration = _configurationService.LoadConfiguration();
+                
+                // 从注册表读取实际的开机启动状态，确保UI与系统状态一致
+                var actualStartupEnabled = StartupHelper.IsStartupEnabled();
+                if (Configuration.StartWithWindows != actualStartupEnabled)
+                {
+                    Configuration.StartWithWindows = actualStartupEnabled;
+                }
+                
                 StatusMessage = "配置加载完成";
             }
             catch (Exception ex)
@@ -345,6 +354,15 @@ namespace NetworkAdapterHelper.ViewModels
 
                 // 更新快捷键
                 await _hotkeyService.UpdateHotkeysAsync(Configuration);
+
+                // 处理开机启动设置
+                var startupResult = StartupHelper.SetStartup(Configuration.StartWithWindows);
+                if (!startupResult.Success)
+                {
+                    StatusMessage = $"警告: {startupResult.Message}";
+                    MessageBox.Show($"设置已保存，但开机启动配置失败:\n{startupResult.Message}", "警告", 
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
 
                 StatusMessage = "设置保存成功";
                 SettingsSaved?.Invoke(this, EventArgs.Empty);

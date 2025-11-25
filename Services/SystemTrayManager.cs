@@ -232,6 +232,23 @@ namespace NetworkAdapterHelper.Services
                 var settingsItem = new ToolStripMenuItem("设置", null, (s, e) => ShowSettingsWindow?.Invoke(this, EventArgs.Empty));
                 _contextMenu.Items.Add(settingsItem);
 
+                // 诊断
+                var diagnosticsItem = new ToolStripMenuItem("诊断快捷键", null, (s, e) =>
+                {
+                    try
+                    {
+                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            DiagnosticsDialog.Show();
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowNotification("打开诊断窗口失败", ex.Message, System.Windows.Forms.ToolTipIcon.Error);
+                    }
+                });
+                _contextMenu.Items.Add(diagnosticsItem);
+
                 // 刷新
                 var refreshItem = new ToolStripMenuItem("刷新", null, (s, e) => 
                 {
